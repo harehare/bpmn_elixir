@@ -15,7 +15,8 @@ defmodule BpmnWorkflow.Engine do
     :active_tokens,
     :completed_tokens,
     :execution_history,
-    :status
+    :status,
+    :waiting_tasks
   ]
 
   # Client API
@@ -41,6 +42,10 @@ defmodule BpmnWorkflow.Engine do
     GenServer.call(via_tuple(workflow_id), :get_status)
   end
 
+  def trigger_user_task(workflow_id, task_id, trigger_data \\ %{}) do
+    GenServer.call(via_tuple(workflow_id), {:trigger_user_task, task_id, trigger_data})
+  end
+
   # Server Callbacks
 
   @impl true
@@ -55,7 +60,8 @@ defmodule BpmnWorkflow.Engine do
       active_tokens: [],
       completed_tokens: [],
       execution_history: [],
-      status: :initialized
+      status: :initialized,
+      waiting_tasks: %{}
     }
 
     Logger.info("WorkflowEngine[#{workflow_id}] initialized")
@@ -94,6 +100,12 @@ defmodule BpmnWorkflow.Engine do
           DynamicSupervisor.start_child(
             BpmnWorkflow.NodeSupervisor,
             {BpmnWorkflow.Nodes.Gateway, node_opts_with_engine}
+          )
+
+        :user_task ->
+          DynamicSupervisor.start_child(
+            BpmnWorkflow.NodeSupervisor,
+            {BpmnWorkflow.Nodes.UserTask, node_opts_with_engine}
           )
 
         _ ->
@@ -143,10 +155,31 @@ defmodule BpmnWorkflow.Engine do
       status: state.status,
       active_tokens: length(state.active_tokens),
       completed_tokens: length(state.completed_tokens),
-      total_nodes: map_size(state.nodes)
+      total_nodes: map_size(state.nodes),
+      waiting_tasks: state.waiting_tasks
     }
 
     {:reply, status, state}
+  end
+
+  @impl true
+  def handle_call({:trigger_user_task, task_id, trigger_data}, _from, state) do
+    # Check if the task is actually waiting
+    if Map.has_key?(state.waiting_tasks, task_id) do
+      # Forward the trigger to the UserTask node
+      case BpmnWorkflow.Nodes.UserTask.trigger(task_id, trigger_data) do
+        :ok ->
+          # Remove from waiting list
+          new_waiting_tasks = Map.delete(state.waiting_tasks, task_id)
+          new_state = %{state | waiting_tasks: new_waiting_tasks}
+          {:reply, :ok, new_state}
+
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
+    else
+      {:reply, {:error, :not_waiting}, state}
+    end
   end
 
   @impl true
@@ -159,6 +192,7 @@ defmodule BpmnWorkflow.Engine do
       :end_event -> BpmnWorkflow.Nodes.EndEvent.execute(node_id, token)
       :activity -> BpmnWorkflow.Nodes.Activity.execute(node_id, token)
       :gateway -> BpmnWorkflow.Nodes.Gateway.execute(node_id, token)
+      :user_task -> BpmnWorkflow.Nodes.UserTask.execute(node_id, token)
       nil -> Logger.warning("WorkflowEngine[#{state.workflow_id}] unknown node: #{node_id}")
     end
 
@@ -199,6 +233,21 @@ defmodule BpmnWorkflow.Engine do
       Logger.info("WorkflowEngine[#{state.workflow_id}] all tokens completed")
     end
 
+    {:noreply, new_state}
+  end
+
+  @impl true
+  def handle_info({:user_task_waiting, task_id, token}, state) do
+    Logger.info("WorkflowEngine[#{state.workflow_id}] user task #{task_id} is waiting")
+
+    # Add to waiting tasks list
+    new_waiting_tasks =
+      Map.put(state.waiting_tasks, task_id, %{
+        token_id: token.id,
+        waiting_since: DateTime.utc_now()
+      })
+
+    new_state = %{state | waiting_tasks: new_waiting_tasks}
     {:noreply, new_state}
   end
 

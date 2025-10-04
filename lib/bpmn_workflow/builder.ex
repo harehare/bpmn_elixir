@@ -1,109 +1,83 @@
 defmodule BpmnWorkflow.Builder do
   @moduledoc """
-  Helper module for building BPMN workflows with a fluent API.
+  A helper module to build workflow definitions programmatically.
+  This is primarily intended for use in tests and scripts.
   """
 
-  @doc """
-  Creates a new workflow engine.
-  """
-  def create_workflow(workflow_id, start_node_id) do
-    {:ok, _pid} =
-      DynamicSupervisor.start_child(
-        BpmnWorkflow.EngineSupervisor,
-        {BpmnWorkflow.Engine, workflow_id: workflow_id, start_node_id: start_node_id}
-      )
+  alias BpmnWorkflow.Engine
 
-    workflow_id
+  defstruct [:workflow_id, :nodes]
+
+  def new(workflow_id) do
+    %__MODULE__{
+      workflow_id: workflow_id,
+      nodes: []
+    }
   end
 
-  @doc """
-  Adds a start event to the workflow.
-  """
-  def add_start_event(workflow_id, id, opts \\ []) do
-    name = Keyword.get(opts, :name, "Start Event")
-    next_nodes = Keyword.get(opts, :next_nodes, [])
-
-    BpmnWorkflow.Engine.add_node(workflow_id, :start_event,
-      id: id,
-      name: name,
-      next_nodes: next_nodes
-    )
-
-    workflow_id
+  def add_start_event(builder, id, opts \\ []) do
+    opts = Keyword.put_new(opts, :id, id)
+    add_node(builder, :start_event, opts)
   end
 
-  @doc """
-  Adds an end event to the workflow.
-  """
-  def add_end_event(workflow_id, id, opts \\ []) do
-    name = Keyword.get(opts, :name, "End Event")
-
-    BpmnWorkflow.Engine.add_node(workflow_id, :end_event,
-      id: id,
-      name: name
-    )
-
-    workflow_id
+  def add_end_event(builder, id, opts \\ []) do
+    opts = Keyword.put_new(opts, :id, id)
+    add_node(builder, :end_event, opts)
   end
 
-  @doc """
-  Adds an activity to the workflow.
-  """
-  def add_activity(workflow_id, id, opts \\ []) do
-    name = Keyword.get(opts, :name, "Activity")
-    next_nodes = Keyword.get(opts, :next_nodes, [])
-    work_fn = Keyword.get(opts, :work_fn)
-
-    BpmnWorkflow.Engine.add_node(workflow_id, :activity,
-      id: id,
-      name: name,
-      next_nodes: next_nodes,
-      work_fn: work_fn
-    )
-
-    workflow_id
+  def add_activity(builder, id, opts \\ []) do
+    opts = Keyword.put_new(opts, :id, id)
+    add_node(builder, :activity, opts)
   end
 
-  @doc """
-  Adds a gateway to the workflow.
-  """
-  def add_gateway(workflow_id, id, opts \\ []) do
-    name = Keyword.get(opts, :name, "Gateway")
-    type = Keyword.get(opts, :type, :exclusive)
-    next_nodes = Keyword.get(opts, :next_nodes, [])
-    condition_fn = Keyword.get(opts, :condition_fn)
-
-    BpmnWorkflow.Engine.add_node(workflow_id, :gateway,
-      id: id,
-      name: name,
-      type: type,
-      next_nodes: next_nodes,
-      condition_fn: condition_fn
-    )
-
-    workflow_id
+  def add_user_task(builder, id, opts \\ []) do
+    opts = Keyword.put_new(opts, :id, id)
+    add_node(builder, :user_task, opts)
   end
 
-  @doc """
-  Starts the workflow execution.
-  """
+  def add_gateway(builder, id, opts \\ []) do
+    opts = Keyword.put_new(opts, :id, id)
+    add_node(builder, :gateway, opts)
+  end
+
+  def build(builder) do
+    # Find the start node to get its ID
+    start_node =
+      Enum.find(builder.nodes, fn {type, _opts} -> type == :start_event end)
+
+    unless start_node do
+      raise "Workflow must have at least one start_event"
+    end
+
+    {_type, start_node_opts} = start_node
+    start_node_id = Keyword.fetch!(start_node_opts, :id)
+
+    # Start the engine with the correct start_node_id
+    case Engine.start_link(workflow_id: builder.workflow_id, start_node_id: start_node_id) do
+      {:ok, _pid} ->
+        # Add all nodes to the newly started engine
+        Enum.each(builder.nodes, fn {type, opts} ->
+          :ok = Engine.add_node(builder.workflow_id, type, opts)
+        end)
+
+        {:ok, builder.workflow_id}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Facade functions for interacting with the workflow
+
   def start(workflow_id, initial_data \\ %{}) do
-    BpmnWorkflow.Engine.start_workflow(workflow_id, initial_data)
+    Engine.start_workflow(workflow_id, initial_data)
   end
 
-  @doc """
-  Visualizes the workflow.
-  """
   def visualize(workflow_id) do
     BpmnWorkflow.Visualizer.visualize(workflow_id)
-    workflow_id
   end
 
-  @doc """
-  Displays workflow status.
-  """
-  def status(workflow_id) do
-    BpmnWorkflow.Visualizer.status_line(workflow_id)
-    workflow_id
+  defp add_node(builder, type, opts) do
+    %{builder | nodes: [{type, opts} | builder.nodes]}
   end
 end
