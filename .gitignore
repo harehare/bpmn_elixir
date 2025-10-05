@@ -25,3 +25,5 @@ bpmn_workflow-*.tar
 *.dump
 
 .elixir_ls
+
+settings.local.json

@@ -15,7 +15,12 @@ defmodule BpmnWorkflow.Application do
       # DynamicSupervisor for node workers
       {DynamicSupervisor, strategy: :one_for_one, name: BpmnWorkflow.NodeSupervisor},
       # DynamicSupervisor for workflow engines
-      {DynamicSupervisor, strategy: :one_for_one, name: BpmnWorkflow.EngineSupervisor}
+      {DynamicSupervisor, strategy: :one_for_one, name: BpmnWorkflow.EngineSupervisor},
+      # HTTP API endpoint
+      {Plug.Cowboy,
+       scheme: :http,
+       plug: BpmnWorkflowWeb.Endpoint,
+       options: [port: Application.get_env(:bpmn_workflow, BpmnWorkflowWeb.Endpoint)[:http_port]]}
     ]
 
     opts = [strategy: :one_for_one, name: BpmnWorkflow.Supervisor]

@@ -85,6 +85,25 @@ defmodule BpmnWorkflow.Builder do
   end
 
   @doc """
+  Adds a user task to the workflow.
+  User tasks wait for external user input before continuing.
+  """
+  def add_user_task(workflow_id, id, opts \\ []) do
+    name = Keyword.get(opts, :name, "User Task")
+    next_nodes = Keyword.get(opts, :next_nodes, [])
+    form_fields = Keyword.get(opts, :form_fields, [])
+
+    BpmnWorkflow.Engine.add_node(workflow_id, :user_task,
+      id: id,
+      name: name,
+      next_nodes: next_nodes,
+      form_fields: form_fields
+    )
+
+    workflow_id
+  end
+
+  @doc """
   Starts the workflow execution.
   """
   def start(workflow_id, initial_data \\ %{}) do

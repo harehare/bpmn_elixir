@@ -14,6 +14,7 @@ defmodule BpmnWorkflow.Engine do
     :start_node_id,
     :active_tokens,
     :completed_tokens,
+    :waiting_tokens,
     :execution_history,
     :status
   ]
@@ -54,6 +55,7 @@ defmodule BpmnWorkflow.Engine do
       start_node_id: start_node_id,
       active_tokens: [],
       completed_tokens: [],
+      waiting_tokens: %{},
       execution_history: [],
       status: :initialized
     }
@@ -94,6 +96,12 @@ defmodule BpmnWorkflow.Engine do
           DynamicSupervisor.start_child(
             BpmnWorkflow.NodeSupervisor,
             {BpmnWorkflow.Nodes.Gateway, node_opts_with_engine}
+          )
+
+        :user_task ->
+          DynamicSupervisor.start_child(
+            BpmnWorkflow.NodeSupervisor,
+            {BpmnWorkflow.Nodes.UserTask, node_opts_with_engine}
           )
 
         _ ->
@@ -159,6 +167,7 @@ defmodule BpmnWorkflow.Engine do
       :end_event -> BpmnWorkflow.Nodes.EndEvent.execute(node_id, token)
       :activity -> BpmnWorkflow.Nodes.Activity.execute(node_id, token)
       :gateway -> BpmnWorkflow.Nodes.Gateway.execute(node_id, token)
+      :user_task -> BpmnWorkflow.Nodes.UserTask.execute(node_id, token)
       nil -> Logger.warning("WorkflowEngine[#{state.workflow_id}] unknown node: #{node_id}")
     end
 
@@ -178,6 +187,52 @@ defmodule BpmnWorkflow.Engine do
   end
 
   @impl true
+  def handle_info({:user_task_waiting, node_id, token}, state) do
+    Logger.info("WorkflowEngine[#{state.workflow_id}] token #{token.id} waiting at user task #{node_id}")
+
+    # Move token from active to waiting
+    new_active = Enum.reject(state.active_tokens, fn t -> t.id == token.id end)
+    new_waiting = Map.put(state.waiting_tokens, token.id, {node_id, token})
+
+    # Update status if no more active tokens but still have waiting tokens
+    new_status =
+      cond do
+        length(new_active) == 0 and map_size(new_waiting) > 0 -> :waiting
+        length(new_active) == 0 and map_size(new_waiting) == 0 -> :completed
+        true -> state.status
+      end
+
+    new_state = %{
+      state
+      | active_tokens: new_active,
+        waiting_tokens: new_waiting,
+        status: new_status
+    }
+
+    {:noreply, new_state}
+  end
+
+  @impl true
+  def handle_info({:user_task_completed, node_id, token}, state) do
+    Logger.info("WorkflowEngine[#{state.workflow_id}] user task #{node_id} completed for token #{token.id}")
+
+    # Remove token from waiting
+    new_waiting = Map.delete(state.waiting_tokens, token.id)
+
+    # Add token back to active (it will be moved by the next node)
+    new_active = [token | state.active_tokens]
+
+    new_state = %{
+      state
+      | waiting_tokens: new_waiting,
+        active_tokens: new_active,
+        status: :running
+    }
+
+    {:noreply, new_state}
+  end
+
+  @impl true
   def handle_info({:workflow_completed, _node_id, token}, state) do
     Logger.info("WorkflowEngine[#{state.workflow_id}] workflow completed for token #{token.id}")
 
@@ -185,8 +240,11 @@ defmodule BpmnWorkflow.Engine do
     new_active = Enum.reject(state.active_tokens, fn t -> t.id == token.id end)
     new_completed = [token | state.completed_tokens]
 
-    # Update status if no more active tokens
-    new_status = if length(new_active) == 0, do: :completed, else: state.status
+    # Update status if no more active or waiting tokens
+    new_status =
+      if length(new_active) == 0 and map_size(state.waiting_tokens) == 0,
+        do: :completed,
+        else: state.status
 
     new_state = %{
       state

@@ -1,4 +1,4 @@
-# BpmnWorkflow
+# Bpmn Elixir
 
 A BPMN (Business Process Model and Notation) workflow engine implemented in Elixir with independent worker processes for each node type.
 
@@ -188,4 +188,3 @@ mix test
 ## License
 
 This project is created as an example/demo implementation.
-
