@@ -8,6 +8,8 @@ defmodule BpmnWorkflow.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      # Database Repo
+      BpmnWorkflow.Repo,
       # Registry for workflow engines
       {Registry, keys: :unique, name: BpmnWorkflow.EngineRegistry},
       # Registry for node workers

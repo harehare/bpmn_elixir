@@ -27,3 +27,10 @@ bpmn_workflow-*.tar
 .elixir_ls
 
 settings.local.json
+
+*.db
+
+settings.local.json
+
+*.db-shm
+*.db-wal

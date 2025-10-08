@@ -12,6 +12,9 @@ defmodule BpmnWorkflowWeb.Router do
 
   plug(:dispatch)
 
+  forward("/api/definitions", to: BpmnWorkflowWeb.DefinitionController)
+  forward("/api/executions", to: BpmnWorkflowWeb.ExecutionController)
+  forward("/api/node_executions", to: BpmnWorkflowWeb.NodeExecutionController)
   forward("/api/workflows", to: BpmnWorkflowWeb.WorkflowController)
   forward("/api/user_tasks", to: BpmnWorkflowWeb.UserTaskController)
 

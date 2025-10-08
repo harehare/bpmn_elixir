@@ -23,7 +23,10 @@ defmodule BpmnWorkflow.MixProject do
   defp deps do
     [
       {:plug_cowboy, "~> 2.7"},
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      {:ecto_sql, "~> 3.12"},
+      {:postgrex, "~> 0.19"},
+      {:ecto_sqlite3, "~> 0.18"}
     ]
   end
 end

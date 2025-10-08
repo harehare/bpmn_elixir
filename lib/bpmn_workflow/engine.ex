@@ -10,13 +10,15 @@ defmodule BpmnWorkflow.Engine do
 
   defstruct [
     :workflow_id,
+    :workflow_execution_id,
     :nodes,
     :start_node_id,
     :active_tokens,
     :completed_tokens,
     :waiting_tokens,
     :execution_history,
-    :status
+    :status,
+    :node_execution_ids
   ]
 
   # Client API
@@ -47,17 +49,20 @@ defmodule BpmnWorkflow.Engine do
   @impl true
   def init(opts) do
     workflow_id = Keyword.fetch!(opts, :workflow_id)
+    workflow_execution_id = Keyword.get(opts, :workflow_execution_id)
     start_node_id = Keyword.get(opts, :start_node_id)
 
     state = %__MODULE__{
       workflow_id: workflow_id,
+      workflow_execution_id: workflow_execution_id,
       nodes: %{},
       start_node_id: start_node_id,
       active_tokens: [],
       completed_tokens: [],
       waiting_tokens: %{},
       execution_history: [],
-      status: :initialized
+      status: :initialized,
+      node_execution_ids: %{}
     }
 
     Logger.info("WorkflowEngine[#{workflow_id}] initialized")
@@ -161,8 +166,16 @@ defmodule BpmnWorkflow.Engine do
   def handle_info({:forward_token, node_id, token}, state) do
     Logger.info("WorkflowEngine[#{state.workflow_id}] forwarding token #{token.id} to #{node_id}")
 
+    # Track node execution start
+    node_type = Map.get(state.nodes, node_id)
+    node_execution_id = track_node_start(state, node_id, node_type, token)
+
+    # Store node_execution_id for later tracking
+    key = {node_id, token.id}
+    new_node_execution_ids = Map.put(state.node_execution_ids, key, node_execution_id)
+
     # Route token to the appropriate node type
-    case Map.get(state.nodes, node_id) do
+    case node_type do
       :start_event -> BpmnWorkflow.Nodes.StartEvent.execute(node_id, token)
       :end_event -> BpmnWorkflow.Nodes.EndEvent.execute(node_id, token)
       :activity -> BpmnWorkflow.Nodes.Activity.execute(node_id, token)
@@ -171,12 +184,18 @@ defmodule BpmnWorkflow.Engine do
       nil -> Logger.warning("WorkflowEngine[#{state.workflow_id}] unknown node: #{node_id}")
     end
 
-    {:noreply, state}
+    {:noreply, %{state | node_execution_ids: new_node_execution_ids}}
   end
 
   @impl true
   def handle_info({:node_executed, node_id, token}, state) do
     Logger.info("WorkflowEngine[#{state.workflow_id}] node #{node_id} executed")
+
+    # Track node execution completion
+    key = {node_id, token.id}
+    if node_execution_id = Map.get(state.node_execution_ids, key) do
+      track_node_complete(node_execution_id, token.data)
+    end
 
     # Add to execution history
     history_entry = {DateTime.utc_now(), node_id, token.id}
@@ -189,6 +208,12 @@ defmodule BpmnWorkflow.Engine do
   @impl true
   def handle_info({:user_task_waiting, node_id, token}, state) do
     Logger.info("WorkflowEngine[#{state.workflow_id}] token #{token.id} waiting at user task #{node_id}")
+
+    # Track node execution waiting
+    key = {node_id, token.id}
+    if node_execution_id = Map.get(state.node_execution_ids, key) do
+      track_node_waiting(node_execution_id)
+    end
 
     # Move token from active to waiting
     new_active = Enum.reject(state.active_tokens, fn t -> t.id == token.id end)
@@ -262,5 +287,29 @@ defmodule BpmnWorkflow.Engine do
 
   defp via_tuple(workflow_id) do
     {:via, Registry, {BpmnWorkflow.EngineRegistry, workflow_id}}
+  end
+
+  # Node execution tracking helpers
+
+  defp track_node_start(state, node_id, node_type, token) do
+    case BpmnWorkflow.NodeExecutionTracker.start_execution(%{
+           workflow_id: state.workflow_id,
+           workflow_execution_id: state.workflow_execution_id,
+           token_id: token.id,
+           node_id: node_id,
+           node_type: to_string(node_type || :unknown),
+           input_data: token.data
+         }) do
+      {:ok, node_execution} -> node_execution.id
+      {:error, _} -> nil
+    end
+  end
+
+  defp track_node_complete(node_execution_id, output_data) do
+    BpmnWorkflow.NodeExecutionTracker.complete_execution(node_execution_id, output_data)
+  end
+
+  defp track_node_waiting(node_execution_id) do
+    BpmnWorkflow.NodeExecutionTracker.mark_waiting(node_execution_id)
   end
 end
