@@ -103,12 +103,6 @@ defmodule BpmnWorkflow.Engine do
             {BpmnWorkflow.Nodes.Gateway, node_opts_with_engine}
           )
 
-        :user_task ->
-          DynamicSupervisor.start_child(
-            BpmnWorkflow.NodeSupervisor,
-            {BpmnWorkflow.Nodes.UserTask, node_opts_with_engine}
-          )
-
         _ ->
           {:error, :unknown_node_type}
       end
@@ -180,7 +174,6 @@ defmodule BpmnWorkflow.Engine do
       :end_event -> BpmnWorkflow.Nodes.EndEvent.execute(node_id, token)
       :activity -> BpmnWorkflow.Nodes.Activity.execute(node_id, token)
       :gateway -> BpmnWorkflow.Nodes.Gateway.execute(node_id, token)
-      :user_task -> BpmnWorkflow.Nodes.UserTask.execute(node_id, token)
       nil -> Logger.warning("WorkflowEngine[#{state.workflow_id}] unknown node: #{node_id}")
     end
 
@@ -206,8 +199,8 @@ defmodule BpmnWorkflow.Engine do
   end
 
   @impl true
-  def handle_info({:user_task_waiting, node_id, token}, state) do
-    Logger.info("WorkflowEngine[#{state.workflow_id}] token #{token.id} waiting at user task #{node_id}")
+  def handle_info({:activity_waiting, node_id, token}, state) do
+    Logger.info("WorkflowEngine[#{state.workflow_id}] token #{token.id} waiting at activity #{node_id}")
 
     # Track node execution waiting
     key = {node_id, token.id}
@@ -238,8 +231,8 @@ defmodule BpmnWorkflow.Engine do
   end
 
   @impl true
-  def handle_info({:user_task_completed, node_id, token}, state) do
-    Logger.info("WorkflowEngine[#{state.workflow_id}] user task #{node_id} completed for token #{token.id}")
+  def handle_info({:activity_completed, node_id, token}, state) do
+    Logger.info("WorkflowEngine[#{state.workflow_id}] activity #{node_id} completed for token #{token.id}")
 
     # Remove token from waiting
     new_waiting = Map.delete(state.waiting_tokens, token.id)
@@ -292,16 +285,21 @@ defmodule BpmnWorkflow.Engine do
   # Node execution tracking helpers
 
   defp track_node_start(state, node_id, node_type, token) do
-    case BpmnWorkflow.NodeExecutionTracker.start_execution(%{
-           workflow_id: state.workflow_id,
-           workflow_execution_id: state.workflow_execution_id,
-           token_id: token.id,
-           node_id: node_id,
-           node_type: to_string(node_type || :unknown),
-           input_data: token.data
-         }) do
-      {:ok, node_execution} -> node_execution.id
-      {:error, _} -> nil
+    # Only track if workflow_execution_id is present (indicates DB-backed execution)
+    if state.workflow_execution_id do
+      case BpmnWorkflow.NodeExecutionTracker.start_execution(%{
+             workflow_id: state.workflow_id,
+             workflow_execution_id: state.workflow_execution_id,
+             token_id: token.id,
+             node_id: node_id,
+             node_type: to_string(node_type || :unknown),
+             input_data: token.data
+           }) do
+        {:ok, node_execution} -> node_execution.id
+        {:error, _} -> nil
+      end
+    else
+      nil
     end
   end
 

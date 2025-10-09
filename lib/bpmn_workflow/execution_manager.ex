@@ -178,7 +178,8 @@ defmodule BpmnWorkflow.ExecutionManager do
       :end_event -> Builder.add_end_event(workflow_id, node["id"], opts)
       :activity -> Builder.add_activity(workflow_id, node["id"], opts)
       :gateway -> Builder.add_gateway(workflow_id, node["id"], opts)
-      :user_task -> Builder.add_user_task(workflow_id, node["id"], opts)
+      # For backward compatibility, treat user_task as activity with activity_type: :user_task
+      :user_task -> Builder.add_activity(workflow_id, node["id"], Keyword.put(opts, :activity_type, :user_task))
       _ -> :ok
     end
   end
@@ -203,6 +204,20 @@ defmodule BpmnWorkflow.ExecutionManager do
     opts =
       if Map.has_key?(node, "form_fields") do
         Keyword.put(opts, :form_fields, node["form_fields"])
+      else
+        opts
+      end
+
+    opts =
+      if Map.has_key?(node, "activity_type") do
+        Keyword.put(opts, :activity_type, String.to_atom(node["activity_type"]))
+      else
+        opts
+      end
+
+    opts =
+      if Map.has_key?(node, "script") do
+        Keyword.put(opts, :script, node["script"])
       else
         opts
       end

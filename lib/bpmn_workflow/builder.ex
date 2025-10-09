@@ -48,17 +48,28 @@ defmodule BpmnWorkflow.Builder do
 
   @doc """
   Adds an activity to the workflow.
+  Supports multiple activity types:
+  - :service_task (default) - executes a function automatically
+  - :user_task - waits for user input via API
+  - :script_task - executes a script
+  - :manual_task - waits for manual confirmation
   """
   def add_activity(workflow_id, id, opts \\ []) do
     name = Keyword.get(opts, :name, "Activity")
     next_nodes = Keyword.get(opts, :next_nodes, [])
+    activity_type = Keyword.get(opts, :activity_type, :service_task)
     work_fn = Keyword.get(opts, :work_fn)
+    form_fields = Keyword.get(opts, :form_fields, [])
+    script = Keyword.get(opts, :script)
 
     BpmnWorkflow.Engine.add_node(workflow_id, :activity,
       id: id,
       name: name,
       next_nodes: next_nodes,
-      work_fn: work_fn
+      activity_type: activity_type,
+      work_fn: work_fn,
+      form_fields: form_fields,
+      script: script
     )
 
     workflow_id
@@ -87,16 +98,19 @@ defmodule BpmnWorkflow.Builder do
   @doc """
   Adds a user task to the workflow.
   User tasks wait for external user input before continuing.
+  This is a convenience wrapper for add_activity with activity_type: :user_task.
+
+  DEPRECATED: Use add_activity with activity_type: :user_task instead.
   """
   def add_user_task(workflow_id, id, opts \\ []) do
     name = Keyword.get(opts, :name, "User Task")
     next_nodes = Keyword.get(opts, :next_nodes, [])
     form_fields = Keyword.get(opts, :form_fields, [])
 
-    BpmnWorkflow.Engine.add_node(workflow_id, :user_task,
-      id: id,
+    add_activity(workflow_id, id,
       name: name,
       next_nodes: next_nodes,
+      activity_type: :user_task,
       form_fields: form_fields
     )
 

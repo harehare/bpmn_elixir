@@ -16,6 +16,8 @@ defmodule BpmnWorkflowWeb.Router do
   forward("/api/executions", to: BpmnWorkflowWeb.ExecutionController)
   forward("/api/node_executions", to: BpmnWorkflowWeb.NodeExecutionController)
   forward("/api/workflows", to: BpmnWorkflowWeb.WorkflowController)
+  forward("/api/activities", to: BpmnWorkflowWeb.ActivityController)
+  # Backward compatibility: keep user_tasks endpoint
   forward("/api/user_tasks", to: BpmnWorkflowWeb.UserTaskController)
 
   match _ do
